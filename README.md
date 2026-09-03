@@ -8,7 +8,7 @@
 
 | 项 | 要求 |
 | --- | --- |
-| JDK | 17+（本仓库以 21 编译，pom.xml 为基准） |
+| JDK | 21（本仓库编译目标，以 pom.xml 为基准，低于 21 编译报"无效的目标发行版"；AgentScope Java 框架自身基线为 17+） |
 | 构建 | Maven 3.6+ |
 | 框架 | AgentScope Java 2.0.1 |
 | 模型 | DeepSeek（OpenAI 兼容端点，默认 `deepseek-chat`） |
