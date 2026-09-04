@@ -13,7 +13,7 @@
 | 框架 | AgentScope Java 2.0.1 |
 | 模型 | DeepSeek（OpenAI 兼容端点，默认 `deepseek-chat`） |
 
-## 快速开始（E01 对话基座）
+## 快速开始
 
 **1. 配置 API Key**（任选其一）：
 
@@ -42,12 +42,15 @@ mvn compile exec:java
 | `/reset` | 重置会话，清空上下文重新开始 |
 | `/quit` | 退出 |
 
+**4. 试试工单查询**（E02 起）：直接问「我的工单 1024 什么状态」「我名下有哪些工单」——Agent 会自主调用 mock 工单工具（输出可见 `[调用工具 xxx]`）；问「今天天气」等无关问题不会触发工具。
+
 ## 当前进度
 
 | 集 | 模块 | 状态 |
 | --- | --- | --- |
 | E01 | M1 对话基座：CLI 多轮对话 + DeepSeek 流式输出 + 配置外置 + 会话重置 | ✅ |
-| E02-E11 | 见 [docs/PRD.md](docs/PRD.md) 里程碑表 | ⬜ |
+| E02 | M2 工单查询工具：@Tool 注解 + Toolkit 注册 + mock 数据源（TicketStore 接口抽象） | ✅ |
+| E03-E11 | 见 [docs/PRD.md](docs/PRD.md) 里程碑表 | ⬜ |
 
 ## 目录结构
 
@@ -55,8 +58,13 @@ mvn compile exec:java
 ├── config/application.properties.example  # 本地配置模板（真实配置不入库）
 ├── docs/PRD.md                            # 产品需求说明书
 └── src/main/java/com/gingko/
-    ├── Main.java                          # CLI 入口：对话循环 + 流式渲染
-    └── config/AgentConfig.java            # 配置集中加载与启动校验
+    ├── Main.java                          # CLI 入口：对话循环 + 流式渲染 + 工具调用事件打印
+    ├── config/AgentConfig.java            # 配置集中加载与启动校验
+    └── ticket/                            # M2 工单域（E02）
+        ├── Ticket.java                    # 工单记录
+        ├── TicketStore.java               # 数据源接口（mock/真实存储可替换）
+        ├── MockTicketStore.java           # mock 数据源（内嵌测试数据）
+        └── TicketTools.java               # @Tool 工具：query_ticket / list_my_tickets
 ```
 
 ## License

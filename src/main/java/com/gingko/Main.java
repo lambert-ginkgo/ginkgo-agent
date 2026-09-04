@@ -1,10 +1,14 @@
 package com.gingko;
 
 import com.gingko.config.AgentConfig;
+import com.gingko.ticket.MockTicketStore;
+import com.gingko.ticket.TicketTools;
 import io.agentscope.core.agent.RuntimeContext;
 import io.agentscope.core.event.AgentEvent;
 import io.agentscope.core.event.TextBlockDeltaEvent;
+import io.agentscope.core.event.ToolCallStartEvent;
 import io.agentscope.core.message.UserMessage;
+import io.agentscope.core.tool.Toolkit;
 import io.agentscope.extensions.model.openai.OpenAIChatModel;
 import io.agentscope.harness.agent.HarnessAgent;
 
@@ -13,7 +17,7 @@ import java.util.Scanner;
 import java.util.UUID;
 
 /**
- * M1 对话基座（E01）：命令行多轮对话 + 流式输出 + 会话重置。
+ * M1 对话基座（E01）+ M2 工单查询工具（E02）：Agent 能调用 mock 工单数据源回答工单问题。
  * 命令：/reset 重置会话（清空上下文重新开始，FR-M1-04）；/quit 退出。
  */
 public class Main {
@@ -37,10 +41,15 @@ public class Main {
                 .stream(true)
                 .build();
 
+        Toolkit toolkit = new Toolkit();
+        toolkit.registerTool(new TicketTools(new MockTicketStore(), MockTicketStore.DEFAULT_USER));
+
         HarnessAgent agent = HarnessAgent.builder()
                 .name("ginkgo-service-desk")
-                .sysPrompt("你是企业 IT 服务台智能体 ginkgo。用简洁的中文回答员工的 IT 求助；不知道就说不知道。")
+                .sysPrompt("你是企业 IT 服务台智能体 ginkgo。用简洁的中文回答员工的 IT 求助；"
+                        + "涉及工单状态、工单列表的问题，先调用工具查询再回答，不要编造工单信息；不知道就说不知道。")
                 .model(model)
+                .toolkit(toolkit)
                 .workspace(Path.of(".agentscope", "workspace"))
                 .build();
 
@@ -86,6 +95,7 @@ public class Main {
     private static void printEvent(AgentEvent event) {
         switch (event.getType()) {
             case TEXT_BLOCK_DELTA -> System.out.print(((TextBlockDeltaEvent) event).getDelta());
+            case TOOL_CALL_START -> System.out.print("\n[调用工具 " + ((ToolCallStartEvent) event).getToolCallName() + "] ");
             default -> {
             }
         }
