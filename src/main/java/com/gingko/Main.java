@@ -133,21 +133,39 @@ public class Main {
 
     private static void resumeSession(String input, String userId, Map<String, RuntimeContext> contexts) {
         String arg = input.replaceFirst("^/resume\\s+", "").trim();
-        int n;
-        try {
-            n = Integer.parseInt(arg);
-        } catch (NumberFormatException e) {
-            System.out.println("用法：/resume <序号>（序号见 /sessions）");
+        if (arg.startsWith("<") && arg.endsWith(">")) {
+            arg = arg.substring(1, arg.length() - 1);
+        }
+        if (arg.isEmpty()) {
+            System.out.println("用法：/resume <序号>（序号见 /sessions，也可直接粘贴完整会话 ID）");
             return;
         }
         List<SessionInfo> sessions = SessionHistory.list(AgentFactory.AGENT_NAME, userId);
-        if (n < 1 || n > sessions.size()) {
-            System.out.println("序号超出范围（1-" + sessions.size() + "），先用 /sessions 查看。");
+        String sessionId = resolveSessionId(arg, sessions);
+        if (sessionId == null) {
+            System.out.println("找不到会话 " + arg
+                    + "——支持 /resume <序号> 或 /resume <完整会话ID>，先用 /sessions 查看。");
             return;
         }
-        String sessionId = sessions.get(n - 1).sessionId();
         contexts.put(userId, RuntimeContext.builder().userId(userId).sessionId(sessionId).build());
         System.out.println("[已挂载历史会话 " + sessionId + "，继续对话即可接上上次进度]");
+    }
+
+    /** /resume 参数解析：数字按序号（最新在前），否则按完整会话 ID 精确匹配。 */
+    private static String resolveSessionId(String arg, List<SessionInfo> sessions) {
+        if (sessions.isEmpty()) {
+            return null;
+        }
+        try {
+            int n = Integer.parseInt(arg);
+            return (n >= 1 && n <= sessions.size()) ? sessions.get(n - 1).sessionId() : null;
+        } catch (NumberFormatException e) {
+            return sessions.stream()
+                    .map(SessionInfo::sessionId)
+                    .filter(id -> id.equals(arg))
+                    .findFirst()
+                    .orElse(null);
+        }
     }
 
     private static void printHelp() {
@@ -155,7 +173,7 @@ public class Main {
                 /reset        重置当前用户的会话（清空上下文）
                 /user <name>  切换对话用户（各用户记忆独立）
                 /sessions     列出当前用户的历史会话
-                /resume <n>   恢复第 n 个历史会话
+                /resume <n>   恢复第 n 个历史会话（或直接粘贴完整会话 ID）
                 /quit         退出""");
     }
 
