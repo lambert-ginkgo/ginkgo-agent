@@ -2,6 +2,8 @@ package com.gingko;
 
 import com.gingko.agent.AgentFactory;
 import com.gingko.config.AgentConfig;
+import com.gingko.knowledge.KnowledgeService;
+import com.gingko.knowledge.KnowledgeService.ImportStats;
 import com.gingko.session.SessionHistory;
 import com.gingko.session.SessionHistory.SessionInfo;
 import com.gingko.ticket.MockTicketStore;
@@ -21,7 +23,7 @@ import java.util.Scanner;
 import java.util.UUID;
 
 /**
- * M1 对话基座（E01）+ M2 工单查询工具（E02）+ M3 会话记忆（E03）。
+ * M1 对话基座（E01）+ M2 工单查询工具（E02）+ M3 会话记忆（E03）+ M4 知识库问答（E04）。
  *
  * <p>E03 新增命令：
  * <ul>
@@ -29,7 +31,14 @@ import java.util.UUID;
  *   <li>{@code /sessions}：列出当前用户的历史会话（状态落盘于 ~/.agentscope/state）</li>
  *   <li>{@code /resume <序号>}：恢复指定历史会话，继续上次进度</li>
  * </ul>
+ *
+ * <p>E04 新增命令：
+ * <ul>
+ *   <li>{@code /kb}：查看知识库统计（文档数/片段数）</li>
+ *   <li>{@code /kb reload}：重新扫描导入知识库目录（FR-M4-02：更新文档后立即生效）</li>
+ * </ul>
  * 原有命令：/reset 重置会话（FR-M1-04）；/quit 退出。Agent 装配见 {@link AgentFactory}。
+ * 未配置 embedding API Key 时知识库问答功能降级关闭，其余功能不受影响。
  */
 public class Main {
 
@@ -46,7 +55,18 @@ public class Main {
             return;
         }
 
-        HarnessAgent agent = AgentFactory.build(config);
+        KnowledgeService knowledge = null;
+        if (config.embeddingConfigured()) {
+            knowledge = KnowledgeService.create(config);
+            ImportStats stats = knowledge.importAll();
+            System.out.println("[知识库] " + stats.summary());
+        } else {
+            System.out.println("[知识库] 未配置 embedding API Key，知识库问答不可用（其余功能不受影响）。");
+            System.out.println("[知识库] 配置方法：设置环境变量 EMBEDDING_API_KEY，"
+                    + "或 config/application.properties 的 ginkgo.embedding.api-key（详见 application.properties.example）。");
+        }
+
+        HarnessAgent agent = AgentFactory.build(config, knowledge);
 
         String currentUser = MockTicketStore.DEFAULT_USER;
         Map<String, RuntimeContext> contexts = new HashMap<>();
@@ -54,7 +74,7 @@ public class Main {
 
         System.out.println("ginkgo-agent 已启动（模型 " + config.modelName() + "）。当前用户：" + currentUser);
         System.out.println("命令：/reset 重置会话 | /user <name> 切换用户 | /sessions 历史会话 | "
-                + "/resume <序号> 恢复会话 | /help 帮助 | /quit 退出");
+                + "/resume <序号> 恢复会话 | /kb 知识库 | /help 帮助 | /quit 退出");
 
         Scanner scanner = new Scanner(System.in);
         while (true) {
@@ -101,6 +121,10 @@ public class Main {
             }
             if (input.startsWith("/resume")) {
                 resumeSession(input, currentUser, contexts);
+                continue;
+            }
+            if (input.startsWith("/kb")) {
+                handleKb(input, knowledge);
                 continue;
             }
 
@@ -151,6 +175,33 @@ public class Main {
         System.out.println("[已挂载历史会话 " + sessionId + "，继续对话即可接上上次进度]");
     }
 
+    /** /kb 命令：查看知识库统计；/kb reload 重新扫描导入（FR-M4-02）。 */
+    private static void handleKb(String input, KnowledgeService knowledge) {
+        if (knowledge == null) {
+            System.out.println("知识库未启用：未配置 embedding API Key（EMBEDDING_API_KEY 或 ginkgo.embedding.api-key）。");
+            return;
+        }
+        String arg = input.replaceFirst("^/kb\\s*", "").trim();
+        if (arg.equals("reload")) {
+            boolean wasReady = knowledge.isReady();
+            ImportStats stats = knowledge.reload();
+            System.out.println("[知识库] 已重新导入：" + stats.summary());
+            System.out.println("[知识库] 文档目录：" + KnowledgeService.KNOWLEDGE_DIR.toAbsolutePath());
+            if (stats.success() && !wasReady) {
+                System.out.println("[知识库] 注意：本次进程启动时导入失败、检索工具未注册，重启进程后知识库问答才会启用。");
+            }
+            return;
+        }
+        if (!arg.isEmpty()) {
+            System.out.println("用法：/kb 查看统计 | /kb reload 重新扫描导入");
+            return;
+        }
+        ImportStats stats = knowledge.stats();
+        System.out.println("[知识库] " + stats.summary());
+        System.out.println("[知识库] 文档目录：" + KnowledgeService.KNOWLEDGE_DIR.toAbsolutePath()
+                + "（修改/新增 .md 后执行 /kb reload 生效）");
+    }
+
     /** /resume 参数解析：数字按序号（最新在前），否则按完整会话 ID 精确匹配。 */
     private static String resolveSessionId(String arg, List<SessionInfo> sessions) {
         if (sessions.isEmpty()) {
@@ -174,6 +225,7 @@ public class Main {
                 /user <name>  切换对话用户（各用户记忆独立）
                 /sessions     列出当前用户的历史会话
                 /resume <n>   恢复第 n 个历史会话（或直接粘贴完整会话 ID）
+                /kb           查看知识库统计（/kb reload 重新导入）
                 /quit         退出""");
     }
 

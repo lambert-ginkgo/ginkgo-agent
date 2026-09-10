@@ -46,7 +46,8 @@ public final class LongConversationRun {
             System.exit(1);
             return;
         }
-        HarnessAgent agent = AgentFactory.build(config);
+        // E03 验收不启用知识库（保持 M3 场景纯净），E04 检索层验收见 KnowledgeAcceptanceRun
+        HarnessAgent agent = AgentFactory.build(config, null);
 
         isolationCheck(agent);
         longConversationCheck(agent);

@@ -12,7 +12,7 @@
         <maven.compiler.source>21</maven.compiler.source>
         <maven.compiler.target>21</maven.compiler.target>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
-        <agentscope.version>2.0.1</agentscope.version>
+        <agentscope.version>2.0.3</agentscope.version>
     </properties>
 
     <dependencies>
@@ -25,6 +25,73 @@
             <groupId>io.agentscope</groupId>
             <artifactId>agentscope-extensions-model-openai</artifactId>
             <version>${agentscope.version}</version>
+        </dependency>
+        <!--
+            M4 知识库问答（E04）：AgentScope 官方 RAG 扩展（SimpleKnowledge / InMemoryStore /
+            OpenAITextEmbedding / TextChunker）。core 里的 rag 包自 2.0 起整包
+            @Deprecated(forRemoval)，官方指引"在应用层集成检索"，实现收口到本扩展包。
+            注意：该包 POM 把全部向量库/文档解析 SDK 声明为 compile 传递依赖（非 optional），
+            这里按需 exclusion——本项目只用进程内 InMemoryStore + OpenAI 兼容 embedding，
+            不引入 Milvus/ES/Qdrant/PG/PDFBox/POI/Tika/DashScope SDK。
+        -->
+        <dependency>
+            <groupId>io.agentscope</groupId>
+            <artifactId>agentscope-extensions-rag-simple</artifactId>
+            <version>${agentscope.version}</version>
+            <exclusions>
+                <exclusion>
+                    <groupId>io.agentscope</groupId>
+                    <artifactId>agentscope-extensions-model-dashscope</artifactId>
+                </exclusion>
+                <exclusion>
+                    <groupId>com.alibaba</groupId>
+                    <artifactId>dashscope-sdk-java</artifactId>
+                </exclusion>
+                <exclusion>
+                    <groupId>io.agentscope</groupId>
+                    <artifactId>agentscope-extensions-model-ollama</artifactId>
+                </exclusion>
+                <exclusion>
+                    <groupId>io.milvus</groupId>
+                    <artifactId>milvus-sdk-java</artifactId>
+                </exclusion>
+                <exclusion>
+                    <groupId>co.elastic.clients</groupId>
+                    <artifactId>elasticsearch-java</artifactId>
+                </exclusion>
+                <exclusion>
+                    <groupId>io.qdrant</groupId>
+                    <artifactId>client</artifactId>
+                </exclusion>
+                <exclusion>
+                    <groupId>org.postgresql</groupId>
+                    <artifactId>postgresql</artifactId>
+                </exclusion>
+                <exclusion>
+                    <groupId>com.pgvector</groupId>
+                    <artifactId>pgvector</artifactId>
+                </exclusion>
+                <exclusion>
+                    <groupId>org.apache.pdfbox</groupId>
+                    <artifactId>pdfbox</artifactId>
+                </exclusion>
+                <exclusion>
+                    <groupId>org.apache.poi</groupId>
+                    <artifactId>poi-ooxml</artifactId>
+                </exclusion>
+                <exclusion>
+                    <groupId>org.apache.tika</groupId>
+                    <artifactId>tika-core</artifactId>
+                </exclusion>
+                <exclusion>
+                    <groupId>org.apache.tika</groupId>
+                    <artifactId>tika-parsers-standard-package</artifactId>
+                </exclusion>
+                <exclusion>
+                    <groupId>org.apache.httpcomponents.client5</groupId>
+                    <artifactId>httpclient5</artifactId>
+                </exclusion>
+            </exclusions>
         </dependency>
     </dependencies>
 

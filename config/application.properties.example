@@ -2,7 +2,20 @@
 # 用法：复制本文件为 config/application.properties 并填入真实值。
 # config/application.properties 已被 .gitignore 忽略，密钥不会入库（NFR-02）。
 
+# ---- 对话模型（DeepSeek）----
 # DeepSeek API Key（也可直接用环境变量 DEEPSEEK_API_KEY，环境变量优先）
 ginkgo.model.api-key=sk-在这里填你的Key
 ginkgo.model.base-url=https://api.deepseek.com
 ginkgo.model.name=deepseek-chat
+
+# ---- 向量模型（E04 知识库问答，可选）----
+# DeepSeek 官方 API 不提供 embeddings 端点，向量模型需另配一个 OpenAI 兼容服务。
+# 默认指向阿里云百炼 OpenAI 兼容端点（注册 https://bailian.console.aliyun.com 领取 Key，
+# text-embedding-v3 按量计费极低）；也可换硅基流动（https://siliconflow.cn，BAAI/bge-m3 免费）等
+# 任意 OpenAI 兼容服务，改 base-url 与 model-name 即可。
+# 未配置时知识库问答功能自动关闭，其余功能不受影响。
+# 环境变量：EMBEDDING_API_KEY / EMBEDDING_BASE_URL / EMBEDDING_MODEL / EMBEDDING_DIMENSIONS
+ginkgo.embedding.api-key=
+ginkgo.embedding.base-url=https://dashscope.aliyuncs.com/compatible-mode/v1
+ginkgo.embedding.model-name=text-embedding-v3
+ginkgo.embedding.dimensions=1024
