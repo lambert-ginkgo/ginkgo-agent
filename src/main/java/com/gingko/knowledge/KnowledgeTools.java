@@ -30,6 +30,8 @@ public class KnowledgeTools {
             concurrencySafe = true)
     public String searchKnowledge(
             @ToolParam(name = "query", description = "要检索的问题或关键词，如：VPN 连不上怎么办") String query) {
+        // 检索可观测（M10 前置）：模型传参可能与用户原话不同（ReAct 自主决定 query），留痕便于排查
+        System.err.println("[search_knowledge] query=" + query);
         List<Document> hits;
         try {
             hits = service.search(query);
