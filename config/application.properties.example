@@ -11,11 +11,13 @@ ginkgo.model.name=deepseek-chat
 # ---- 向量模型（E04 知识库问答，可选）----
 # DeepSeek 官方 API 不提供 embeddings 端点，向量模型需另配一个 OpenAI 兼容服务。
 # 默认指向阿里云百炼 OpenAI 兼容端点（注册 https://bailian.console.aliyun.com 领取 Key，
-# text-embedding-v3 按量计费极低）；也可换硅基流动（https://siliconflow.cn，BAAI/bge-m3 免费）等
+# qwen3.7-text-embedding-flash 按量计费极低）；也可换硅基流动（https://siliconflow.cn，BAAI/bge-m3 免费）等
 # 任意 OpenAI 兼容服务，改 base-url 与 model-name 即可。
+# !! 坑：base-url 用通用端点 https://dashscope.aliyuncs.com/compatible-mode/v1，
+# !! 不要用百炼控制台 API Key 页面显示的账号专属端点（llm-xxx...maas.aliyuncs.com/api/v1）——配它必 404。
 # 未配置时知识库问答功能自动关闭，其余功能不受影响。
 # 环境变量：EMBEDDING_API_KEY / EMBEDDING_BASE_URL / EMBEDDING_MODEL / EMBEDDING_DIMENSIONS
 ginkgo.embedding.api-key=
 ginkgo.embedding.base-url=https://dashscope.aliyuncs.com/compatible-mode/v1
-ginkgo.embedding.model-name=text-embedding-v3
+ginkgo.embedding.model-name=qwen3.7-text-embedding-flash
 ginkgo.embedding.dimensions=1024

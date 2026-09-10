@@ -12,7 +12,7 @@
 | 构建 | Maven 3.6+ |
 | 框架 | AgentScope Java 2.0.3（E04 起从 2.0.1 升级：状态乐观并发、FinalAnswerFilterMiddleware、推理循环可靠性修复等；升级点详见系列 E04 文章） |
 | 模型 | DeepSeek（OpenAI 兼容端点，默认 `deepseek-chat`） |
-| 向量模型（E04 起，可选） | OpenAI 兼容 embedding 服务（默认阿里云百炼 `text-embedding-v3`，可换硅基流动等；DeepSeek 官方 API 无 embeddings 端点） |
+| 向量模型（E04 起，可选） | OpenAI 兼容 embedding 服务（默认阿里云百炼 `qwen3.7-text-embedding-flash`，可换硅基流动等；DeepSeek 官方 API 无 embeddings 端点。注意用通用端点 `dashscope.aliyuncs.com/compatible-mode/v1`，别用控制台显示的专属端点——会 404） |
 
 ## 快速开始
 
