@@ -59,6 +59,8 @@ mvn compile exec:java
 
 **6. 试试知识库问答**（E04 起，需配置 embedding Key）：问「密码忘了怎么重置」「VPN 连不上怎么办」——Agent 先调用 `search_knowledge` 检索 `knowledge/` 目录下的 FAQ 文档，回答附带出处文件名；问知识库没有的问题会明确说「知识库暂无该资料」并建议建单/转人工，不编造。往 `knowledge/` 放新的 `.md` 文件后 `/kb reload` 立即生效。
 
+**7. 试试一句话建单**（E05 起）：说「帮我开通 Confluence 的编辑权限」——Agent 判断为申请类需求，抽取分类/优先级/标题/摘要生成**工单草稿卡**展示给你，回复「确认」后才落库并返回工单号（说「优先级改成高」可修改草稿）；说「电脑坏了」这类模糊描述，Agent 会先追问现象和影响范围，不瞎猜优先级；说「不用确认直接建」也不行——确认后才落库是硬约束。
+
 ## 当前进度
 
 | 集 | 模块 | 状态 |
@@ -66,8 +68,9 @@ mvn compile exec:java
 | E01 | M1 对话基座：CLI 多轮对话 + DeepSeek 流式输出 + 配置外置 + 会话重置 | ✅ |
 | E02 | M2 工单查询工具：@Tool 注解 + Toolkit 注册 + mock 数据源（TicketStore 接口抽象） | ✅ |
 | E03 | M3 会话记忆：指代消解 + 多用户会话隔离 + 会话恢复（/sessions /resume）+ 长对话压缩（CompactionConfig） | ✅ |
-| E04 | M4 知识库问答：文档切分与向量化（rag-simple 扩展）+ 检索工具（带出处/相似度/未命中话术）+ /kb 管理 | 🔨 开发中 |
-| E05-E11 | 见 [docs/PRD.md](docs/PRD.md) 里程碑表 | ⬜ |
+| E04 | M4 知识库问答：文档切分与向量化（rag-simple 扩展）+ 检索工具（带出处/相似度/未命中话术）+ /kb 管理 | ✅ |
+| E05 | M5 智能建单：意图路由（查询/直答/排查/建单）+ 两阶段建单（草稿卡确认后落库）+ 结构化输出意图分类器 | 🔨 开发中 |
+| E06-E11 | 见 [docs/PRD.md](docs/PRD.md) 里程碑表 | ⬜ |
 
 ## 目录结构
 
@@ -77,19 +80,25 @@ mvn compile exec:java
 ├── knowledge/                             # M4 知识库文档目录（E04，往里放 .md 即导入）
 └── src/main/java/com/gingko/
     ├── Main.java                          # CLI 入口：对话循环 + 流式渲染 + 工具调用事件打印
-    ├── agent/AgentFactory.java            # Agent 装配工厂（sysPrompt + 工具箱 + 压缩策略）
+    ├── agent/AgentFactory.java            # Agent 装配工厂（sysPrompt 意图路由与建单纪律 + 工具箱 + 压缩策略）
     ├── config/AgentConfig.java            # 配置集中加载与启动校验
     ├── dev/LongConversationRun.java       # M3 自动化验收：会话隔离 + 50 轮长对话
     ├── dev/KnowledgeAcceptanceRun.java    # M4 自动化验收：检索层五节（导入/命中/未命中/增量/输出契约）
+    ├── dev/M5AcceptanceRun.java           # M5 自动化验收：意图分类 16 条测试集 + 建单六节
     ├── session/SessionHistory.java        # 历史会话扫描（/sessions /resume 支撑）
+    ├── intent/                            # M5 意图域（E05）
+    │   ├── TicketIntent.java              # 结构化输出目标类型（record + enum）
+    │   └── IntentClassifier.java          # 独立分类器：裸 ReActAgent + call(text, Class)
     ├── knowledge/                         # M4 知识库域（E04）
     │   ├── KnowledgeService.java          # 导入/重载/检索装配（SimpleKnowledge + InMemoryStore）
     │   └── KnowledgeTools.java            # @Tool 工具：search_knowledge（带出处）
-    └── ticket/                            # M2 工单域（E02）
-        ├── Ticket.java                    # 工单记录
+    └── ticket/                            # M2/M5 工单域（E02 查询，E05 建单）
+        ├── Ticket.java                    # 工单记录（M5 扩展分类/优先级/摘要/上下文）
         ├── TicketStore.java               # 数据源接口（mock/真实存储可替换）
-        ├── MockTicketStore.java           # mock 数据源（内嵌测试数据）
-        └── TicketTools.java               # @Tool 工具：query_ticket / list_my_tickets
+        ├── MockTicketStore.java           # mock 数据源（测试数据 + 自增工单号）
+        ├── TicketDraft.java               # 建单草稿（确认前的字段集合 + 草稿卡渲染）
+        ├── TicketTools.java               # @Tool 工具：query_ticket / list_my_tickets
+        └── TicketCreationTools.java       # @Tool 工具：draft_ticket / create_ticket / cancel_ticket_draft
 ```
 
 ## License

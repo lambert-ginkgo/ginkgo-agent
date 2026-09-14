@@ -8,6 +8,7 @@ import java.util.stream.Collectors;
 /**
  * 工单查询工具（M2，E02）：Agent 的第一个业务工具。
  * 经 Toolkit.registerTool 反射注册（@Tool 方法进 basic 组，始终激活）。
+ * M5（E05）：query_ticket 输出扩展建单字段（分类/优先级/摘要/对话上下文，FR-M5-04）。
  */
 public class TicketTools {
 
@@ -20,7 +21,7 @@ public class TicketTools {
     }
 
     @Tool(name = "query_ticket",
-            description = "按工单号查询工单详情，返回状态、标题、处理人、创建时间",
+            description = "按工单号查询工单详情，返回状态、标题、分类、优先级、摘要、处理人、创建时间",
             readOnly = true,
             concurrencySafe = true)
     public String queryTicket(
@@ -29,8 +30,12 @@ public class TicketTools {
                 .map(t -> "工单号：" + t.id()
                         + "\n标题：" + t.title()
                         + "\n状态：" + t.status()
-                        + "\n处理人：" + t.assignee()
-                        + "\n创建时间：" + t.createdAt())
+                        + "\n分类：" + t.category() + "｜优先级：" + t.priority()
+                        + "\n处理人：" + (t.assignee() == null ? "待分派" : t.assignee())
+                        + "\n创建时间：" + t.createdAt()
+                        + "\n摘要：" + t.summary()
+                        + (t.contextSummary() == null || t.contextSummary().isBlank()
+                                ? "" : "\n对话上下文：" + t.contextSummary()))
                 .orElse("未找到工单 " + ticketId + "，请确认工单号是否正确");
     }
 
@@ -45,7 +50,8 @@ public class TicketTools {
         }
         return "你共有 " + tickets.size() + " 个工单：\n"
                 + tickets.stream()
-                        .map(t -> "[" + t.id() + "] " + t.title() + " — " + t.status() + "（处理人：" + t.assignee() + "）")
+                        .map(t -> "[" + t.id() + "] " + t.title() + " — " + t.status()
+                                + "（处理人：" + (t.assignee() == null ? "待分派" : t.assignee()) + "）")
                         .collect(Collectors.joining("\n"));
     }
 }

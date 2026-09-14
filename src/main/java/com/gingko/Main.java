@@ -23,7 +23,13 @@ import java.util.Scanner;
 import java.util.UUID;
 
 /**
- * M1 对话基座（E01）+ M2 工单查询工具（E02）+ M3 会话记忆（E03）+ M4 知识库问答（E04）。
+ * M1 对话基座（E01）+ M2 工单查询工具（E02）+ M3 会话记忆（E03）+ M4 知识库问答（E04）
+ * + M5 智能建单（E05）。
+ *
+ * <p>M5（E05）：对话中即可完成两阶段建单——描述问题（如“帮我开通 Confluence 的编辑权限”），
+ * Agent 抽取字段生成工单草稿卡，确认后落库并返回工单号；意图路由（查询/直答/排查/建单）
+ * 与建单纪律见 {@link com.gingko.agent.AgentFactory} sysPrompt。自动化验收见
+ * {@code dev.M5AcceptanceRun}。
  *
  * <p>E03 新增命令：
  * <ul>
