@@ -3,8 +3,8 @@
 | 项 | 值 |
 | --- | --- |
 | 产品名 | ginkgo-agent（IT 服务台智能体） |
-| 文档版本 | v0.5 |
-| 日期 | 2026-09-09 |
+| 文档版本 | v0.6 |
+| 日期 | 2026-09-14 |
 | 状态 | 已定稿（E01 启动评审），此后随需求变更修订并记录版本 |
 | 关联 | 公众号系列「手搓企业智能体」第一季（选题库见博客仓库 `enterprise-agent-topics.md`，主库索引 T42） |
 | 技术基座 | AgentScope Java 2.0.x + DeepSeek 模型（API 细节以官方文档为准，本文档只约定能力不写死实现） |
@@ -322,7 +322,7 @@ LLM Agent 的机会正好在这三步：**自然语言描述问题**（免表单
 | --- | --- | --- | --- |
 | Q1 | IM 平台选哪个？ | 🗳 待共创投票（E05 发布时置顶评论发起，E08 收口） | 候选：钉钉 / 企业微信 / 飞书；平台适配层（FR-M9-04）保证选择不影响其他模块 |
 | Q2 | 工单存储选型：内嵌 DB（H2/SQLite）还是文件？ | ⬜ E02 动笔时定 | 约束：单机 Docker 可跑、重启不丢数据（见 M11 验收标准持久化卷条目）、零外部依赖 |
-| Q3 | 向量检索方案？ | ✅ 已决策（2026-09-09） | 官方 `agentscope-extensions-rag-simple` 扩展：`SimpleKnowledge` + 进程内 `InMemoryStore`（cosine 相似度，零外部依赖，满足"不引入独立向量库运维"约束）+ `OpenAITextEmbedding`（OpenAI 兼容协议）。要点：①core 的 rag 包 2.0 起整包 `@Deprecated(forRemoval)`（官方注释 "RAG is being redesigned"），可用实现收口在扩展包，其 POM 携带全量向量库/文档解析 SDK 需 exclusion 治理；②DeepSeek 官方 API 无 embeddings 端点，embedding 默认走阿里云百炼 `text-embedding-v3`（1024 维，OpenAI 兼容模式），与对话模型分家配置；③HarnessAgent 无 knowledge()/ragMode() 挂载点（ReActAgent 上亦已废弃），检索以 `@Tool search_knowledge` 工具接入，与 M2 工具模式统一；④FR-M4-03 出处要求由自写导入器/工具满足（官方 KnowledgeRetrievalTools 输出不含出处、TextReader 产物无文件名 payload） |
+| Q3 | 向量检索方案？ | ✅ 已决策（2026-09-09，2026-09-14 补类型口径） | 官方 `agentscope-extensions-rag-simple` 扩展：`SimpleKnowledge` + 进程内 `InMemoryStore`（cosine 相似度，零外部依赖，满足"不引入独立向量库运维"约束）+ `OpenAITextEmbedding`（OpenAI 兼容协议）。要点：①core 的 rag 包 2.0 起整包 `@Deprecated(forRemoval)`（官方注释 "RAG is being redesigned"），可用实现收口在扩展包，其 POM 携带全量向量库/文档解析 SDK 需 exclusion 治理；②DeepSeek 官方 API 无 embeddings 端点，embedding 默认走阿里云百炼 `text-embedding-v3`（1024 维，OpenAI 兼容模式），与对话模型分家配置；③HarnessAgent 无 knowledge()/ragMode() 挂载点（ReActAgent 上亦已废弃），检索以 `@Tool search_knowledge` 工具接入，与 M2 工具模式统一；④FR-M4-03 出处要求由自写导入器/工具满足（官方 KnowledgeRetrievalTools 输出不含出处、TextReader 产物无文件名 payload）；⑤**类型口径澄清（E05 复查，双 jar 类清单实证）**：扩展包的类（SimpleKnowledge/InMemoryStore/TextChunker/OpenAITextEmbedding 等）打包在 `io.agentscope.core.rag.*` 包名空间下（扩展 jar 复用 core 包名补齐实现），**无废弃标记**；core 自身 rag 包仅 9 个接口/模型类（Knowledge 接口、RAGMode、GenericRAGHook、model 包），废弃标记只落在这层。ginkgo 的 KnowledgeService 字段与构造器类型已从废弃的 `Knowledge` 接口改为 `SimpleKnowledge` 具体类（消除 forRemoval 引用）；`RetrieveConfig`/`Document`/`DocumentMetadata` 为扩展包 API 公共类型、当前无替代品，官方 redesign 落地前保持，**框架升级时须回归验证检索链路** |
 | Q4 | 用户体系 MVP 是否静态配置文件即可？ | ✅ 倾向是（E02 若发现配置不足再复议） | 不做用户管理界面，IM id → 角色映射走配置；第二季再做管理端 |
 | Q5 | 知识库文档格式是否扩展到 PDF/Word？ | ⬜ 第二季 | MVP 只做 Markdown 纯文本 |
 | Q6 | Web 框架引入时机：E01 就上 Spring Boot 还是按需引入？ | ✅ 已决策（2026-09-03） | E01-E08 保持纯 Java SE + CLI 验证入口；E09 随 IM 接入引入 Spring Boot Web（回调端点与签名鉴权是硬需求，FR-M9-02）。依据：E01「2 个依赖」最小性承诺（已实测发布口径）、CLI 场景 DI 无收益、HarnessAgent 为纯 Java 对象届时封装为 Bean 迁移成本近零、配置已集中收口（AgentConfig → application.yml 平移） |
@@ -331,6 +331,7 @@ LLM Agent 的机会正好在这三步：**自然语言描述问题**（免表单
 
 | 日期 | 版本 | 变更 |
 | --- | --- | --- |
+| 2026-09-14 | v0.6 | E05 复查澄清 Q3 类型口径（新增要点⑤）：扩展包类打包在 core 包名空间（`io.agentscope.core.rag.*`）且无废弃标记，core 废弃的仅接口/模型层 9 类；KnowledgeService 字段类型 `Knowledge`→`SimpleKnowledge` 消除 forRemoval 引用；RetrieveConfig/Document 等 model 类无替代、官方 redesign 前保持 |
 | 2026-09-03 | v0.1 | 初稿（依据系列选题库 E01-E12 规划起草，待 E01 启动时评审定稿） |
 | 2026-09-03 | v0.2 | E01 启动评审定稿：新增 Q6 决策（Web 框架引入时机）；M1 需求入口明确为命令行（HTTP 入口归 E09） |
 | 2026-09-03 | v0.3 | PRD 审查修订（7 项）：①FR-M8-02 通知通道抽象化，E08 以日志/CLI 模拟通道验收、E09 随 M9 换真实 IM（消解与 Q6 的冲突）；②FR-M7-01 明确 E07 CLI 期以会话参数/配置模拟当前用户、E09 切换 IM 透传；③E01 里程碑平台改 Gitee 并标记 ✅ 已达成（原 GitHub 为事实错误）；④Q2 持久化约束改引用 M11 验收标准持久化卷条目（原误引 FR-M11-04）；⑤删除全文零使用的 P2 优先级定义；⑥Q1 共创投票提前至 E05 发布时发起、E08 收口；⑦Q4 状态图标 🗺 改 ✅（附 E02 复议注） |

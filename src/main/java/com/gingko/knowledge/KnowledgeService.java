@@ -4,7 +4,6 @@ import com.gingko.config.AgentConfig;
 import io.agentscope.core.embedding.EmbeddingModel;
 import io.agentscope.core.embedding.openai.OpenAITextEmbedding;
 import io.agentscope.core.message.TextBlock;
-import io.agentscope.core.rag.Knowledge;
 import io.agentscope.core.rag.knowledge.SimpleKnowledge;
 import io.agentscope.core.rag.model.Document;
 import io.agentscope.core.rag.model.DocumentMetadata;
@@ -30,6 +29,16 @@ import java.util.stream.Stream;
  *
  * <p>存储用进程内 {@link InMemoryStore}（重启即重建，导入器保持幂等全量重建语义），
  * 符合 PRD Q3"避免 MVP 引入独立向量库运维"的约束。
+ *
+ * <p>类型选择（E05 顺手澄清 E04 遗留口径）：字段与构造器直接用扩展包的
+ * {@link SimpleKnowledge} 具体类型，而非 core 的 {@code io.agentscope.core.rag.Knowledge}
+ * 接口——后者已 {@code @Deprecated(forRemoval = true)}（官方注明 "RAG is being
+ * redesigned; legacy adapters remain functional"），而扩展包的实现类
+ * （SimpleKnowledge / InMemoryStore / TextChunker，由 agentscope-extensions-rag-simple
+ * 提供但打包在 {@code io.agentscope.core.rag.*} 包名空间下）没有废弃标记。
+ * {@code RetrieveConfig} / {@code Document} / {@code DocumentMetadata} 等 model 类
+ * 是扩展包 API 的公共类型、当前无替代品（换不了），官方 redesign 落地前保持现状，
+ * 框架升级时需回归验证检索链路。
  */
 public final class KnowledgeService {
 
@@ -45,12 +54,12 @@ public final class KnowledgeService {
     static final double SCORE_THRESHOLD = 0.45;
 
     private final InMemoryStore store;
-    private final Knowledge knowledge;
+    private final SimpleKnowledge knowledge;
     private final Path knowledgeDir;
 
     private volatile ImportStats lastImport = new ImportStats(0, 0, 0, true, null);
 
-    private KnowledgeService(InMemoryStore store, Knowledge knowledge, Path knowledgeDir) {
+    private KnowledgeService(InMemoryStore store, SimpleKnowledge knowledge, Path knowledgeDir) {
         this.store = store;
         this.knowledge = knowledge;
         this.knowledgeDir = knowledgeDir;
