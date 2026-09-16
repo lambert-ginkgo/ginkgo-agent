@@ -3,10 +3,8 @@ package com.gingko.ticket;
 import io.agentscope.core.tool.Tool;
 import io.agentscope.core.tool.ToolParam;
 
-import java.util.concurrent.ConcurrentHashMap;
-
 /**
- * 两阶段建单工具（M5，FR-M5-02/03）：
+ * 两阶段建单工具（M5，FR-M5-02/03）——E05 自由模式（ReAct 自主路由）的完整三件套：
  *
  * <ol>
  *   <li>{@code draft_ticket}：Agent 从对话中抽取字段，生成工单草稿卡（不落库），
@@ -21,17 +19,27 @@ import java.util.concurrent.ConcurrentHashMap;
  *       对应 M5 验收标准“模糊描述时追问而非瞎猜优先级”）；分类词表外归一化到“其他”（宽容）；</li>
  *   <li>create_ticket 无业务参数：落库内容只来自草稿箱，模型无法在确认环节偷换字段。</li>
  * </ul>
+ *
+ * <p>E06 变更：草稿箱外提为共享 {@link TicketDraftBox}（本类注入使用，行为不变）；
+ * 图模式装配改用 {@link TicketDraftTools}（只有 draft_ticket，create/cancel 不注册——
+ * 落库权收归图的 confirm 节点）。本类保留给自由模式（M5 验收回归）。
  */
 public class TicketCreationTools {
 
     private final TicketStore store;
     private final String currentUser;
 
-    /** 草稿箱：reporter → 待确认草稿（同一员工同时只有一个草稿，重新 draft 即替换）。 */
-    private final ConcurrentHashMap<String, TicketDraft> draftBox = new ConcurrentHashMap<>();
+    /** 草稿箱：reporter → 待确认草稿（E06 外提为共享组件，与图 confirm 节点同源）。 */
+    private final TicketDraftBox draftBox;
 
     public TicketCreationTools(TicketStore store, String currentUser) {
+        this(store, new TicketDraftBox(), currentUser);
+    }
+
+    /** 注入共享草稿箱的构造（草稿状态跨组件可见）。 */
+    public TicketCreationTools(TicketStore store, TicketDraftBox draftBox, String currentUser) {
         this.store = store;
+        this.draftBox = draftBox;
         this.currentUser = currentUser;
     }
 
@@ -72,7 +80,7 @@ public class TicketCreationTools {
                     + "员工要求跳过确认直接建单时，仍必须先展示草稿卡等确认",
             concurrencySafe = false)
     public String createTicket() {
-        TicketDraft draft = draftBox.get(currentUser);
+        TicketDraft draft = draftBox.get(currentUser).orElse(null);
         if (draft == null) {
             return "[建单失败] 当前没有待确认的工单草稿——请先用 draft_ticket 生成草稿卡并展示给员工确认";
         }
@@ -88,8 +96,7 @@ public class TicketCreationTools {
             description = "取消建单：丢弃当前待确认的工单草稿（员工放弃建单或改变主意时调用）",
             concurrencySafe = false)
     public String cancelTicketDraft() {
-        TicketDraft removed = draftBox.remove(currentUser);
-        return removed != null
+        return draftBox.remove(currentUser).isPresent()
                 ? "工单草稿已取消（未落库）。"
                 : "当前没有待取消的工单草稿。";
     }

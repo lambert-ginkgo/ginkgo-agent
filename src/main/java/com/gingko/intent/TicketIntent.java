@@ -15,7 +15,11 @@ public record TicketIntent(
         @JsonPropertyDescription("意图分类结果，四选一") Intent intent,
         @JsonPropertyDescription("分类依据，一句话说明判定理由") String reason) {
 
-    /** 四类意图（PRD FR-M5-01）：TROUBLESHOOT 是兜底意图（分类不确定时的默认落点）。 */
+    /**
+     * 意图枚举（PRD FR-M5-01 四类 + E06 挂起态两类）：
+     * TROUBLESHOOT 是兜底意图（分类不确定时的默认落点）；
+     * CONFIRM_DRAFT / CANCEL_DRAFT 仅在存在待确认草稿时可能输出（图模式挂起检查）。
+     */
     public enum Intent {
         /** 查询：问已有工单的状态、进度、处理人或工单列表。 */
         QUERY_TICKET,
@@ -24,6 +28,10 @@ public record TicketIntent(
         /** 排查：故障/异常类问题，需要交互式收集信息（如 VPN 连不上）。兜底意图。 */
         TROUBLESHOOT,
         /** 建单：申请/变更类需求（如开通权限、领用设备），或明确要求创建工单。 */
-        CREATE_TICKET
+        CREATE_TICKET,
+        /** E06：确认当前待确认的工单草稿（如“确认”“没问题”“就这样建吧”）。仅挂起态可触发。 */
+        CONFIRM_DRAFT,
+        /** E06：取消建单、丢弃草稿（如“算了”“先不建了”）。仅挂起态可触发。 */
+        CANCEL_DRAFT
     }
 }

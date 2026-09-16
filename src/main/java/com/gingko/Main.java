@@ -2,11 +2,14 @@ package com.gingko;
 
 import com.gingko.agent.AgentFactory;
 import com.gingko.config.AgentConfig;
+import com.gingko.flow.ServiceDeskFlow;
+import com.gingko.flow.ServiceDeskFlow.FlowResult;
 import com.gingko.knowledge.KnowledgeService;
 import com.gingko.knowledge.KnowledgeService.ImportStats;
 import com.gingko.session.SessionHistory;
 import com.gingko.session.SessionHistory.SessionInfo;
 import com.gingko.ticket.MockTicketStore;
+import com.gingko.workflow.NodeTrace;
 import io.agentscope.core.agent.RuntimeContext;
 import io.agentscope.core.event.AgentEvent;
 import io.agentscope.core.event.TextBlockDeltaEvent;
@@ -18,18 +21,19 @@ import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
 import java.util.HashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Scanner;
 import java.util.UUID;
 
 /**
  * M1 对话基座（E01）+ M2 工单查询工具（E02）+ M3 会话记忆（E03）+ M4 知识库问答（E04）
- * + M5 智能建单（E05）。
+ * + M5 智能建单（E05）+ M6 流程编排（E06）。
  *
- * <p>M5（E05）：对话中即可完成两阶段建单——描述问题（如“帮我开通 Confluence 的编辑权限”），
- * Agent 抽取字段生成工单草稿卡，确认后落库并返回工单号；意图路由（查询/直答/排查/建单）
- * 与建单纪律见 {@link com.gingko.agent.AgentFactory} sysPrompt。自动化验收见
- * {@code dev.M5AcceptanceRun}。
+ * <p>M6（E06）：消息入口默认走 {@link ServiceDeskFlow} 图编排——意图路由/知识预检索/
+ * 建单确认门固化为图节点（轨迹见每条消息后的 [流程] 行）；{@code /mode react}
+ * 可切回 E05 的 ReAct 自由对话模式（sysPrompt 路由 + 模型自主两阶段建单），
+ * 两种模式同一会话上下文，可实时对照「流程固定 vs 自由发挥」的行为差异。
  *
  * <p>E03 新增命令：
  * <ul>
@@ -43,6 +47,7 @@ import java.util.UUID;
  *   <li>{@code /kb}：查看知识库统计（文档数/片段数）</li>
  *   <li>{@code /kb reload}：重新扫描导入知识库目录（FR-M4-02：更新文档后立即生效）</li>
  * </ul>
+ * E06 新增命令：{@code /mode graph|react} 切换编排模式（默认 graph）。
  * 原有命令：/reset 重置会话（FR-M1-04）；/quit 退出。Agent 装配见 {@link AgentFactory}。
  * 未配置 embedding API Key 时知识库问答功能降级关闭，其余功能不受影响。
  */
@@ -72,78 +77,123 @@ public class Main {
                     + "或 config/application.properties 的 ginkgo.embedding.api-key（详见 application.properties.example）。");
         }
 
-        HarnessAgent agent = AgentFactory.build(config, knowledge);
+        // E06：图模式为默认入口；react 自由模式懒加载（/mode react 时装配，对照实验用）
+        ServiceDeskFlow flow = ServiceDeskFlow.create(config, knowledge);
+        HarnessAgent freeAgent = null;
 
         String currentUser = MockTicketStore.DEFAULT_USER;
         Map<String, RuntimeContext> contexts = new HashMap<>();
         contexts.put(currentUser, newContext(currentUser));
+        boolean graphMode = true;
 
-        System.out.println("ginkgo-agent 已启动（模型 " + config.modelName() + "）。当前用户：" + currentUser);
+        System.out.println("ginkgo-agent 已启动（模型 " + config.modelName() + "，编排：graph）。当前用户：" + currentUser);
         System.out.println("命令：/reset 重置会话 | /user <name> 切换用户 | /sessions 历史会话 | "
-                + "/resume <序号> 恢复会话 | /kb 知识库 | /help 帮助 | /quit 退出");
+                + "/resume <序号> 恢复会话 | /kb 知识库 | /mode graph|react 编排模式 | /help 帮助 | /quit 退出");
 
-        Scanner scanner = new Scanner(System.in);
-        while (true) {
-            System.out.print("\n你(" + currentUser + ") > ");
-            if (!scanner.hasNextLine()) {
-                break;
-            }
-            String input = scanner.nextLine().trim();
-            if (input.isEmpty()) {
-                continue;
-            }
-
-            if (input.equals("/quit") || input.equals("/exit")) {
-                System.out.println("再见。");
-                return;
-            }
-            if (input.equals("/help")) {
-                printHelp();
-                continue;
-            }
-            if (input.equals("/reset")) {
-                contexts.put(currentUser, newContext(currentUser));
-                System.out.println("[会话已重置，上下文已清空]");
-                continue;
-            }
-            if (input.startsWith("/user")) {
-                String name = input.replaceFirst("^/user\\s+", "").trim();
-                if (name.isEmpty()) {
-                    System.out.println("用法：/user <name>（如 /user zhangsan）");
+        try (Scanner scanner = new Scanner(System.in)) {
+            while (true) {
+                String pendingMark = graphMode && flow.hasPendingDraft() ? "（草稿待确认）" : "";
+                System.out.print("\n你(" + currentUser + ")" + pendingMark + " > ");
+                if (!scanner.hasNextLine()) {
+                    break;
+                }
+                String input = scanner.nextLine().trim();
+                if (input.isEmpty()) {
                     continue;
                 }
-                currentUser = name;
-                RuntimeContext ctx = contexts.computeIfAbsent(name, Main::newContext);
-                String note = name.equals(MockTicketStore.DEFAULT_USER)
-                        ? ""
-                        : "\n注：CLI 期工单数据仍以 " + MockTicketStore.DEFAULT_USER
-                                + " 身份查询（数据级权限 E07 接入），本命令只切换对话记忆";
-                System.out.println("[已切换到 " + name + "，会话 " + shortId(ctx.getSessionId()) + "]" + note);
-                continue;
-            }
-            if (input.equals("/sessions")) {
-                printSessions(currentUser, contexts.get(currentUser));
-                continue;
-            }
-            if (input.startsWith("/resume")) {
-                resumeSession(input, currentUser, contexts);
-                continue;
-            }
-            if (input.startsWith("/kb")) {
-                handleKb(input, knowledge);
-                continue;
-            }
 
-            System.out.print("agent > ");
-            try {
-                agent.streamEvents(new UserMessage(input), contexts.get(currentUser))
-                        .doOnNext(Main::printEvent)
-                        .blockLast();
-                System.out.println();
-            } catch (Exception e) {
-                System.err.println("\n[调用失败] " + e.getMessage() + "（可重试，或 /reset 开新会话）");
+                if (input.equals("/quit") || input.equals("/exit")) {
+                    System.out.println("再见。");
+                    break;
+                }
+                if (input.equals("/help")) {
+                    printHelp();
+                    continue;
+                }
+                if (input.equals("/reset")) {
+                    contexts.put(currentUser, newContext(currentUser));
+                    System.out.println("[会话已重置，上下文已清空]");
+                    continue;
+                }
+                if (input.startsWith("/user")) {
+                    String name = input.replaceFirst("^/user\\s+", "").trim();
+                    if (name.isEmpty()) {
+                        System.out.println("用法：/user <name>（如 /user zhangsan）");
+                        continue;
+                    }
+                    currentUser = name;
+                    RuntimeContext ctx = contexts.computeIfAbsent(name, Main::newContext);
+                    String note = name.equals(MockTicketStore.DEFAULT_USER)
+                            ? ""
+                            : "\n注：CLI 期工单数据仍以 " + MockTicketStore.DEFAULT_USER
+                                    + " 身份查询（数据级权限 E07 接入），本命令只切换对话记忆";
+                    System.out.println("[已切换到 " + name + "，会话 " + shortId(ctx.getSessionId()) + "]" + note);
+                    continue;
+                }
+                if (input.equals("/sessions")) {
+                    printSessions(currentUser, contexts.get(currentUser));
+                    continue;
+                }
+                if (input.startsWith("/resume")) {
+                    resumeSession(input, currentUser, contexts);
+                    continue;
+                }
+                if (input.startsWith("/kb")) {
+                    handleKb(input, knowledge);
+                    continue;
+                }
+                if (input.startsWith("/mode")) {
+                    String mode = input.replaceFirst("^/mode\\s*", "").trim().toLowerCase(Locale.ROOT);
+                    if (mode.equals("graph")) {
+                        graphMode = true;
+                        System.out.println("[编排模式：graph——意图路由/知识预检索/建单确认门由图节点固化，每条消息后打印流程轨迹]");
+                    } else if (mode.equals("react")) {
+                        if (freeAgent == null) {
+                            freeAgent = AgentFactory.build(config, knowledge);
+                        }
+                        graphMode = false;
+                        System.out.println("[编排模式：react——E05 自由对话（sysPrompt 路由 + 模型自主两阶段建单），同会话上下文对照]");
+                    } else {
+                        System.out.println("用法：/mode graph（图编排，默认） | /mode react（自由对话）");
+                    }
+                    continue;
+                }
+
+                System.out.print("agent > ");
+                try {
+                    if (graphMode) {
+                        FlowResult result = flow.dispatch(input, contexts.get(currentUser), Main::printEvent);
+                        System.out.println();
+                        printFlowTrace(result);
+                        if (result.error() != null) {
+                            System.err.println("[流程异常] " + result.error().getMessage()
+                                    + "（可重试，或 /reset 开新会话）");
+                        }
+                    } else {
+                        freeAgent.streamEvents(new UserMessage(input), contexts.get(currentUser))
+                                .doOnNext(Main::printEvent)
+                                .blockLast();
+                        System.out.println();
+                    }
+                } catch (Exception e) {
+                    System.err.println("\n[调用失败] " + e.getMessage() + "（可重试，或 /reset 开新会话）");
+                }
+            }
+        } finally {
+            flow.close();
+            if (freeAgent != null) {
+                freeAgent.close();
             }
         }
+    }
+
+    /** 图模式轨迹输出（FR-M6-03）：每条消息打印走过的节点路径与各步耗时。 */
+    private static void printFlowTrace(FlowResult result) {
+        String path = NodeTrace.renderPath(result.trace());
+        String intent = result.intent() == null ? "?" : result.intent().name();
+        System.out.println("[流程] " + path + " ｜ 意图: " + intent
+                + (result.intentReason() == null || result.intentReason().isBlank()
+                        ? "" : "（" + result.intentReason() + "）"));
     }
 
     private static void printSessions(String userId, RuntimeContext current) {
@@ -227,12 +277,13 @@ public class Main {
 
     private static void printHelp() {
         System.out.println("""
-                /reset        重置当前用户的会话（清空上下文）
-                /user <name>  切换对话用户（各用户记忆独立）
-                /sessions     列出当前用户的历史会话
-                /resume <n>   恢复第 n 个历史会话（或直接粘贴完整会话 ID）
-                /kb           查看知识库统计（/kb reload 重新导入）
-                /quit         退出""");
+                /reset             重置当前用户的会话（清空上下文）
+                /user <name>       切换对话用户（各用户记忆独立）
+                /sessions          列出当前用户的历史会话
+                /resume <n>        恢复第 n 个历史会话（或直接粘贴完整会话 ID）
+                /kb                查看知识库统计（/kb reload 重新导入）
+                /mode graph|react  编排模式：graph=图编排（默认）/ react=自由对话
+                /quit              退出""");
     }
 
     private static void printEvent(AgentEvent event) {

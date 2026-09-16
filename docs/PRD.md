@@ -326,11 +326,13 @@ LLM Agent 的机会正好在这三步：**自然语言描述问题**（免表单
 | Q4 | 用户体系 MVP 是否静态配置文件即可？ | ✅ 倾向是（E02 若发现配置不足再复议） | 不做用户管理界面，IM id → 角色映射走配置；第二季再做管理端 |
 | Q5 | 知识库文档格式是否扩展到 PDF/Word？ | ⬜ 第二季 | MVP 只做 Markdown 纯文本 |
 | Q6 | Web 框架引入时机：E01 就上 Spring Boot 还是按需引入？ | ✅ 已决策（2026-09-03） | E01-E08 保持纯 Java SE + CLI 验证入口；E09 随 IM 接入引入 Spring Boot Web（回调端点与签名鉴权是硬需求，FR-M9-02）。依据：E01「2 个依赖」最小性承诺（已实测发布口径）、CLI 场景 DI 无收益、HarnessAgent 为纯 Java 对象届时封装为 Bean 迁移成本近零、配置已集中收口（AgentConfig → application.yml 平移） |
+| Q7 | M6 流程编排用什么实现？框架有 Graph 编排 API 吗？ | ✅ 已决策（2026-09-16，E06） | **AgentScope Java 2.0.3 没有图编排原语，M6 手搓轻量图引擎**（`workflow` 包）。三源核实：①core jar 487 类无任何 graph/pipeline/workflow 相关类；②v1 文档的编排类（StateGraph/SequentialAgent/ParallelAgent/LoopAgent）全部来自 Spring AI Alibaba（`com.alibaba.cloud.ai.graph.*` 包），且示例模块已在 2.0 包重构中移除；③v2 的 Workflow（/v2/en/service/workflows.md）是控制台 UI 服务级设计器（CEL 条件/approval 节点），非 Java SDK API——SDK 侧编排能力仅有 Subagent/Team（LLM 在推理循环中自主委派，与「固化为确定性工作流」的 M6 诉求方向相反）。手搓设计（~300 行）：NodeAction 函数节点 + WorkflowGraph Builder（固定边/条件边 + compile 校验 + MAX_STEPS 防死循环）+ WorkflowState 全局状态 + NodeTrace 轨迹（FR-M6-03）。**架构要点**：①确定性节点（检索/落库/清理）纯 Java 直调，智能节点（分类/答复/抽取）内部调 LLM——智能不出节点、流转永远确定；②意图路由结论以任务标签（[工作流任务：X]）随消息下发（首版翻车：图判了建单、节点内模型自己去检索——路由结论不传导则节点内二次选路）；③create_ticket 不注册给模型，落库只走图 confirm 节点（反静默建单的工具不在场硬保证）；④无状态意图分类器的多轮漂移以上轮意图提示修复（RoutingContext）；⑤ReAct 自由模式保留（/mode 切换），同会话对照两种编排行为 |
 
 **变更记录**：
 
 | 日期 | 版本 | 变更 |
 | --- | --- | --- |
+| 2026-09-16 | v0.7 | 新增 Q7 决策（M6 流程编排）：AgentScope Java 2.0.3 无图编排原语（三源核实），手搓轻量图引擎——确定性节点纯 Java、智能节点内调 LLM、路由结论随消息下发、create_ticket 收权至图 confirm 节点；ReAct 自由模式保留可切换 |
 | 2026-09-14 | v0.6 | E05 复查澄清 Q3 类型口径（新增要点⑤）：扩展包类打包在 core 包名空间（`io.agentscope.core.rag.*`）且无废弃标记，core 废弃的仅接口/模型层 9 类；KnowledgeService 字段类型 `Knowledge`→`SimpleKnowledge` 消除 forRemoval 引用；RetrieveConfig/Document 等 model 类无替代、官方 redesign 前保持 |
 | 2026-09-03 | v0.1 | 初稿（依据系列选题库 E01-E12 规划起草，待 E01 启动时评审定稿） |
 | 2026-09-03 | v0.2 | E01 启动评审定稿：新增 Q6 决策（Web 框架引入时机）；M1 需求入口明确为命令行（HTTP 入口归 E09） |
