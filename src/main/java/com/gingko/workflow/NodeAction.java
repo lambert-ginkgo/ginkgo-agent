@@ -6,10 +6,11 @@ import java.util.Map;
  * 函数节点动作（M6，FR-M6-01）：接收全局状态，返回状态更新。
  *
  * <p>概念对齐（v1 官方文档的 NodeAction，手搓实现）：AgentScope Java 2.0.3 的
- * core 包里没有任何图编排原语（487 个类无一与 graph/pipeline/workflow 相关），
- * v1 文档展示的 StateGraph/SequentialAgent 等编排类来自 Spring AI Alibaba
- * （{@code com.alibaba.cloud.ai.graph.*} 包），且其示例模块已在 2.0 包重构中移除。
- * 「把流程固化为确定性工作流」在本框架里没有现成轮子——本包就是手搓的那只轮子。
+ * core 包里没有任何图编排原语（441 个类无一与 graph/pipeline/workflow 相关，
+ * jar tf 类清单核查实证），v1 文档展示的 StateGraph/SequentialAgent 等编排类
+ * 来自 Spring AI Alibaba（{@code com.alibaba.cloud.ai.graph.*} 包），且其示例
+ * 模块已在 2.0 包重构中移除。「把流程固化为确定性工作流」在本框架里没有现成
+ * 轮子——本包就是手搓的那只轮子。
  *
  * <p>节点分两类（混合确定性与智能，这是工作流编排的核心价值）：
  * <ul>
