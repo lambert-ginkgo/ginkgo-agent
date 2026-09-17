@@ -75,6 +75,8 @@ public final class M6AcceptanceRun {
             new Case(TicketIntent.Intent.CREATE_TICKET, PATH_CREATE, "帮我建个工单，会议室投影仪坏了"),
             new Case(TicketIntent.Intent.CREATE_TICKET, PATH_CREATE, "键盘失灵了，帮我建个单"));
 
+    private static final String U = MockTicketStore.DEFAULT_USER;
+
     public static void main(String[] args) {
         AgentConfig config;
         try {
@@ -145,13 +147,13 @@ public final class M6AcceptanceRun {
                 System.out.println("  [异常] " + r.error().getMessage());
                 return false;
             }
-            System.out.println("  ↳ " + t + " → " + r.path() + " 挂起=" + flow.hasPendingDraft()
+            System.out.println("  ↳ " + t + " → " + r.path() + " 挂起=" + flow.hasPendingDraft(U)
                     + " 回复：" + firstLine(r.reply() == null ? "" : r.reply()));
-            if (flow.hasPendingDraft()) {
+            if (flow.hasPendingDraft(U)) {
                 return true;
             }
         }
-        return flow.hasPendingDraft();
+        return flow.hasPendingDraft(U);
     }
 
     // ---------- 节一：20 条混合意图测试集（无死循环 + 支路命中） ----------
@@ -160,7 +162,7 @@ public final class M6AcceptanceRun {
         System.out.println("========== 节一：混合意图测试集（20 条，支路命中 + 无死循环） ==========");
         int pass = 0;
         for (Case c : CASES) {
-            flow.clearPendingDraft(); // 用例隔离：挂起草稿会切换分类提示词
+            flow.clearPendingDraft(U); // 用例隔离：挂起草稿会切换分类提示词
             FlowResult r = say(flow, c.input());
             boolean ok = r.error() == null
                     && r.intent() == c.expected()
@@ -185,7 +187,7 @@ public final class M6AcceptanceRun {
 
     private static boolean s1DirectAnswerCheck(ServiceDeskFlow flow, boolean kbReady) {
         System.out.println("\n========== 节二：S1 直答复核（FR-M6-01/02：必检索 + 出处） ==========");
-        flow.clearPendingDraft();
+        flow.clearPendingDraft(U);
         FlowResult r = say(flow, "密码忘了怎么重置");
         boolean pathOk = r.path().equals(PATH_DIRECT);
         System.out.println("轨迹：" + r.path() + "（kb_presearch 在场 = 检索必发生，代码保证非模型自觉）");
@@ -203,7 +205,7 @@ public final class M6AcceptanceRun {
 
     private static boolean s3DraftConfirmCheck(ServiceDeskFlow flow, MockTicketStore store) {
         System.out.println("\n========== 节三：S3 建单 + 挂起恢复（FR-M6-02 + 确认门代码化） ==========");
-        flow.clearPendingDraft();
+        flow.clearPendingDraft(U);
         int before = store.size();
 
         boolean draftOk = driveToDraft(flow,
@@ -214,7 +216,7 @@ public final class M6AcceptanceRun {
         FlowResult confirm = say(flow, "确认");
         boolean confirmPathOk = confirm.path().equals(List.of("intent_route", "confirm_create", "agent_notify"));
         boolean landed = store.size() == before + 1;
-        boolean cleared = !flow.hasPendingDraft();
+        boolean cleared = !flow.hasPendingDraft(U);
         Ticket created = store.size() > before ? latest(store) : null;
         boolean replyOk = confirm.reply() != null && created != null
                 && confirm.reply().contains(created.id());
@@ -230,7 +232,7 @@ public final class M6AcceptanceRun {
 
     private static boolean noSilentCreateCheck(ServiceDeskFlow flow, MockTicketStore store) {
         System.out.println("\n========== 节四：反静默建单（工具不在场的硬约束） ==========");
-        flow.clearPendingDraft();
+        flow.clearPendingDraft(U);
         int before = store.size();
 
         boolean drafted = driveToDraft(flow,
@@ -247,7 +249,7 @@ public final class M6AcceptanceRun {
 
     private static boolean cancelDraftCheck(ServiceDeskFlow flow, MockTicketStore store) {
         System.out.println("\n========== 节五：取消挂起（cancel_draft 支路） ==========");
-        flow.clearPendingDraft();
+        flow.clearPendingDraft(U);
         int before = store.size();
 
         boolean draftOk = driveToDraft(flow,
@@ -255,7 +257,7 @@ public final class M6AcceptanceRun {
                 "桌面办公用，本周内到位就行，不急");
         FlowResult cancel = say(flow, "算了，先不建了");
         boolean pathOk = cancel.path().equals(List.of("intent_route", "cancel_draft", "agent_notify"));
-        boolean cleared = !flow.hasPendingDraft();
+        boolean cleared = !flow.hasPendingDraft(U);
         boolean noLanding = store.size() == before;
         System.out.println("草稿挂起：" + (draftOk ? "✅" : "❌")
                 + "，取消路径：" + cancel.path() + " " + (pathOk ? "✅" : "❌")
@@ -268,7 +270,7 @@ public final class M6AcceptanceRun {
 
     private static boolean multiTopicPendingCheck(ServiceDeskFlow flow, MockTicketStore store) {
         System.out.println("\n========== 节六：多话题并行（挂起不阻塞新话题） ==========");
-        flow.clearPendingDraft();
+        flow.clearPendingDraft(U);
         int before = store.size();
 
         boolean draftPending = driveToDraft(flow,
@@ -277,7 +279,7 @@ public final class M6AcceptanceRun {
                 "和之前那张不重复，是新需求，直接生成草稿吧");
         FlowResult topic = say(flow, "VPN 连不上");
         boolean topicNotBlocked = topic.path().equals(PATH_TROUBLESHOOT);
-        boolean draftKept = flow.hasPendingDraft();
+        boolean draftKept = flow.hasPendingDraft(U);
         boolean noLanding = store.size() == before;
         System.out.println("草稿挂起：" + (draftPending ? "✅" : "❌")
                 + "，新话题走排查支路：" + topic.path() + " " + (topicNotBlocked ? "✅" : "❌")

@@ -1,11 +1,14 @@
 package com.gingko.flow;
 
 import com.gingko.agent.AgentFactory;
+import com.gingko.auth.User;
+import com.gingko.auth.UserDirectory;
 import com.gingko.config.AgentConfig;
 import com.gingko.intent.IntentClassifier;
 import com.gingko.intent.IntentClassifier.Classified;
 import com.gingko.intent.TicketIntent;
 import com.gingko.knowledge.KnowledgeService;
+import com.gingko.ticket.AdminTicketTools;
 import com.gingko.ticket.MockTicketStore;
 import com.gingko.ticket.Ticket;
 import com.gingko.ticket.TicketDraft;
@@ -66,23 +69,21 @@ public final class ServiceDeskFlow implements AutoCloseable {
     private final KnowledgeService knowledge;
     private final TicketStore store;
     private final TicketDraftBox draftBox;
-    private final String userId;
     private final WorkflowGraph graph;
     /** per-user 上轮意图（会话连续性路由的锚点：多轮补充消息的分类提示）。 */
     private final Map<String, TicketIntent.Intent> lastIntents = new ConcurrentHashMap<>();
 
     private ServiceDeskFlow(HarnessAgent agent, IntentClassifier classifier, KnowledgeService knowledge,
-            TicketStore store, TicketDraftBox draftBox, String userId) {
+            TicketStore store, TicketDraftBox draftBox) {
         this.agent = agent;
         this.classifier = classifier;
         this.knowledge = knowledge;
         this.store = store;
         this.draftBox = draftBox;
-        this.userId = userId;
         this.graph = buildGraph();
     }
 
-    /** 标准装配（Main 使用）：mock 数据源 + 默认用户。 */
+    /** 标准装配（Main 使用）：mock 数据源。 */
     public static ServiceDeskFlow create(AgentConfig config, KnowledgeService knowledge) {
         return create(config, knowledge, new MockTicketStore());
     }
@@ -92,15 +93,21 @@ public final class ServiceDeskFlow implements AutoCloseable {
         TicketDraftBox draftBox = new TicketDraftBox();
         HarnessAgent agent = AgentFactory.buildForFlow(config, knowledge, store, draftBox);
         IntentClassifier classifier = IntentClassifier.create(config);
-        return new ServiceDeskFlow(agent, classifier, knowledge, store, draftBox, MockTicketStore.DEFAULT_USER);
+        return new ServiceDeskFlow(agent, classifier, knowledge, store, draftBox);
     }
 
     /**
      * 处理一条员工消息：意图路由（挂起感知 + 会话上下文）→ 图执行 → 返回答复与轨迹。
      *
+     * <p>M7（E07）：业务身份从会话上下文取（{@code ctx.getUserId()}）——
+     * 草稿箱分桶、确认落库的 reporter、挂起判定全部按当次会话用户，
+     * 不再是构造时固定的默认用户（E06 及之前 /user 切换只切记忆、
+     * 草稿箱和落库仍挂在默认用户上的错位在本集收口）。
+     *
      * @param eventPrinter 流式事件打印回调（打字机效果，Main 传入；传 null 则不打印）
      */
     public FlowResult dispatch(String input, RuntimeContext ctx, Consumer<AgentEvent> eventPrinter) {
+        String userId = ctx.getUserId();
         WorkflowState state = new WorkflowState();
         state.set("input", input);
         state.set("ctx", ctx);
@@ -132,15 +139,30 @@ public final class ServiceDeskFlow implements AutoCloseable {
         }
     }
 
-    /** 待确认草稿是否存在（Main 展示挂起状态用）。 */
-    public boolean hasPendingDraft() {
+    /** 待确认草稿是否存在（Main 展示挂起状态用；M7 起按会话用户判定）。 */
+    public boolean hasPendingDraft(String userId) {
         return draftBox.has(userId);
     }
 
-    /** 清空当前用户的待确认草稿与上轮意图（验收用例间隔离用）。 */
-    public void clearPendingDraft() {
+    /** 清空指定用户的待确认草稿与上轮意图（验收用例间隔离用）。 */
+    public void clearPendingDraft(String userId) {
         draftBox.remove(userId);
         lastIntents.remove(userId);
+    }
+
+    /**
+     * 切换会话的权限模式（M7，E07 透传 {@link HarnessAgent#setPermissionMode}）：
+     * EXPLORE 为官方引擎的只读模式——readOnly=true 的工具自动放行、写操作 DENY，
+     * {@code @Tool(readOnly = true)} 注解在 2.0.3 的唯一判定入口（三源核实结论）。
+     */
+    public void setPermissionMode(RuntimeContext ctx, io.agentscope.core.permission.PermissionMode mode) {
+        agent.setPermissionMode(ctx, mode);
+    }
+
+    /** 当前会话的权限模式（/perm 命令回显用；注：2.0.3 的 get 只有 (userId, sessionId) 两参版，
+     * 与 set 的 RuntimeContext 重载不对称——文档不写的差异，编译期才发现）。 */
+    public io.agentscope.core.permission.PermissionMode getPermissionMode(RuntimeContext ctx) {
+        return agent.getPermissionMode(ctx.getUserId(), ctx.getSessionId());
     }
 
     // ---------------- 图定义 ----------------
@@ -176,6 +198,7 @@ public final class ServiceDeskFlow implements AutoCloseable {
 
     /** 意图条件边：六类意图 → 六条支路（TROUBLESHOOT 为兜底支路，永不悬空）。 */
     private String routeByIntent(WorkflowState st) {
+        RuntimeContext ctx = (RuntimeContext) st.get("ctx");
         TicketIntent.Intent intent = st.intent();
         if (intent == null) {
             return "agent_reply";
@@ -184,8 +207,8 @@ public final class ServiceDeskFlow implements AutoCloseable {
             case QUERY_TICKET, TROUBLESHOOT -> "agent_reply";
             case DIRECT_ANSWER -> "kb_presearch";
             case CREATE_TICKET -> "agent_draft";
-            case CONFIRM_DRAFT -> draftBox.has(userId) ? "confirm_create" : "agent_reply";
-            case CANCEL_DRAFT -> draftBox.has(userId) ? "cancel_draft" : "agent_reply";
+            case CONFIRM_DRAFT -> draftBox.has(ctx.getUserId()) ? "confirm_create" : "agent_reply";
+            case CANCEL_DRAFT -> draftBox.has(ctx.getUserId()) ? "cancel_draft" : "agent_reply";
         };
     }
 
@@ -252,13 +275,19 @@ public final class ServiceDeskFlow implements AutoCloseable {
 
     /**
      * agent 消息组装：图的路由结论必须随消息下发（任务标签），节点内智能不再二次选路。
+     * M7（E07）：消息头携带会话身份标签——agent 知道"和谁说话"（FR-M7-01），
+     * 权限话术转述可以带上身份（如"你当前是员工身份"）；真正的权限判定不依赖这个标签
+     * （工具层只认 RuntimeContext），标签仅是告知，伪造不了权限。
      * 直答支路再拼预检索结果；系统事件加前缀。
      */
     private static String composeAgentMessage(WorkflowState st, boolean systemEvent) {
         if (systemEvent) {
             return "[系统事件] " + st.get("systemEvent");
         }
-        String base = "[" + taskLabelOf(st.intent()) + "] " + st.input();
+        RuntimeContext ctx = (RuntimeContext) st.get("ctx");
+        User user = UserDirectory.resolve(ctx.getUserId());
+        String base = "[当前身份：" + user.display() + "] "
+                + "[" + taskLabelOf(st.intent()) + "] " + st.input();
         Object prefetch = st.get("kbPrefetch");
         if (prefetch instanceof String kb && !kb.isBlank()) {
             return base + "\n\n---\n" + kb;
@@ -281,13 +310,14 @@ public final class ServiceDeskFlow implements AutoCloseable {
 
     /** 确认落库节点（确认门的代码侧）：草稿箱取出 → {@link TicketStore#create} 落库 → 系统事件交 agent 转述。 */
     private Map<String, Object> confirmCreate(WorkflowState st) {
-        TicketDraft draft = draftBox.remove(userId).orElse(null);
+        RuntimeContext ctx = (RuntimeContext) st.get("ctx");
+        TicketDraft draft = draftBox.remove(ctx.getUserId()).orElse(null);
         if (draft == null) {
             // 结构上不可达（条件边已校验草稿存在），防御性兜底：交 agent 自由答复
             return Map.of("systemEvent", (Object) "员工想确认建单，但待确认草稿已不存在（可能已被处理）。"
                     + "请向员工说明当前没有待确认的草稿，如需建单请重新描述需求。");
         }
-        Ticket created = store.create(draft, userId);
+        Ticket created = store.create(draft, ctx.getUserId());
         return Map.of("systemEvent", (Object) "工单已创建：[" + created.id() + "] " + created.title()
                 + "（分类：" + created.category() + "，优先级：" + created.priority()
                 + "，状态：" + created.status() + "）。请把工单号告知员工，"
@@ -296,7 +326,8 @@ public final class ServiceDeskFlow implements AutoCloseable {
 
     /** 取消草稿节点：清空草稿箱 → 系统事件交 agent 转述。 */
     private Map<String, Object> cancelDraft(WorkflowState st) {
-        draftBox.remove(userId);
+        RuntimeContext ctx = (RuntimeContext) st.get("ctx");
+        draftBox.remove(ctx.getUserId());
         return Map.of("systemEvent", (Object) "员工取消了建单，待确认的工单草稿已丢弃（未落库）。"
                 + "请向员工确认已取消，之后需要建单随时可以说。");
     }

@@ -1,6 +1,8 @@
 package com.gingko;
 
 import com.gingko.agent.AgentFactory;
+import com.gingko.auth.User;
+import com.gingko.auth.UserDirectory;
 import com.gingko.config.AgentConfig;
 import com.gingko.flow.ServiceDeskFlow;
 import com.gingko.flow.ServiceDeskFlow.FlowResult;
@@ -15,6 +17,7 @@ import io.agentscope.core.event.AgentEvent;
 import io.agentscope.core.event.TextBlockDeltaEvent;
 import io.agentscope.core.event.ToolCallStartEvent;
 import io.agentscope.core.message.UserMessage;
+import io.agentscope.core.permission.PermissionMode;
 import io.agentscope.harness.agent.HarnessAgent;
 
 import java.time.ZoneId;
@@ -28,7 +31,11 @@ import java.util.UUID;
 
 /**
  * M1 对话基座（E01）+ M2 工单查询工具（E02）+ M3 会话记忆（E03）+ M4 知识库问答（E04）
- * + M5 智能建单（E05）+ M6 流程编排（E06）。
+ * + M5 智能建单（E05）+ M6 流程编排（E06）+ M7 权限控制（E07）。
+ *
+ * <p>M7（E07）：会话身份贯通——/user 切换的不只是对话记忆，工单数据范围与
+ * 工具权限全部按会话身份判定（员工仅本人工单，IT 管理员全量+处理工单）；
+ * {@code /perm explore} 切入官方权限引擎的只读模式（readOnly 工具放行、写操作拒绝）。
  *
  * <p>M6（E06）：消息入口默认走 {@link ServiceDeskFlow} 图编排——意图路由/知识预检索/
  * 建单确认门固化为图节点（轨迹见每条消息后的 [流程] 行）；{@code /mode react}
@@ -86,14 +93,16 @@ public class Main {
         contexts.put(currentUser, newContext(currentUser));
         boolean graphMode = true;
 
-        System.out.println("ginkgo-agent 已启动（模型 " + config.modelName() + "，编排：graph）。当前用户：" + currentUser);
+        System.out.println("ginkgo-agent 已启动（模型 " + config.modelName() + "，编排：graph）。当前用户："
+                + UserDirectory.resolve(currentUser).display());
         System.out.println("命令：/reset 重置会话 | /user <name> 切换用户 | /sessions 历史会话 | "
-                + "/resume <序号> 恢复会话 | /kb 知识库 | /mode graph|react 编排模式 | /help 帮助 | /quit 退出");
+                + "/resume <序号> 恢复会话 | /kb 知识库 | /mode graph|react 编排模式 | "
+                + "/perm default|explore 权限模式 | /help 帮助 | /quit 退出");
 
         try (Scanner scanner = new Scanner(System.in)) {
             while (true) {
-                String pendingMark = graphMode && flow.hasPendingDraft() ? "（草稿待确认）" : "";
-                System.out.print("\n你(" + currentUser + ")" + pendingMark + " > ");
+                String pendingMark = graphMode && flow.hasPendingDraft(currentUser) ? "（草稿待确认）" : "";
+                System.out.print("\n你(" + UserDirectory.resolve(currentUser).display() + ")" + pendingMark + " > ");
                 if (!scanner.hasNextLine()) {
                     break;
                 }
@@ -118,16 +127,35 @@ public class Main {
                 if (input.startsWith("/user")) {
                     String name = input.replaceFirst("^/user\\s+", "").trim();
                     if (name.isEmpty()) {
-                        System.out.println("用法：/user <name>（如 /user zhangsan）");
+                        System.out.println("用法：/user <name>（如 /user zhangsan，管理员：/user it-admin）");
                         continue;
                     }
                     currentUser = name;
                     RuntimeContext ctx = contexts.computeIfAbsent(name, Main::newContext);
-                    String note = name.equals(MockTicketStore.DEFAULT_USER)
-                            ? ""
-                            : "\n注：CLI 期工单数据仍以 " + MockTicketStore.DEFAULT_USER
-                                    + " 身份查询（数据级权限 E07 接入），本命令只切换对话记忆";
-                    System.out.println("[已切换到 " + name + "，会话 " + shortId(ctx.getSessionId()) + "]" + note);
+                    User user = UserDirectory.resolve(name);
+                    System.out.println("[已切换到 " + user.display() + "，会话 " + shortId(ctx.getSessionId()) + "]"
+                            + "\n注：身份随会话生效——工单数据与工具权限按该身份判定（E07 起）；"
+                            + "未注册用户按员工处理（最低权限兜底）。");
+                    continue;
+                }
+                if (input.startsWith("/perm")) {
+                    String mode = input.replaceFirst("^/perm\\s*", "").trim().toLowerCase(Locale.ROOT);
+                    if (mode.isEmpty()) {
+                        System.out.println("当前权限模式：" + flow.getPermissionMode(contexts.get(currentUser))
+                                + "（用法：/perm default | /perm explore）");
+                        continue;
+                    }
+                    if (!mode.equals("default") && !mode.equals("explore")) {
+                        System.out.println("用法：/perm default（默认） | /perm explore（只读模式——只读工具自动放行，写操作被官方权限引擎拒绝）");
+                        continue;
+                    }
+                    flow.setPermissionMode(contexts.get(currentUser),
+                            mode.equals("explore") ? PermissionMode.EXPLORE : PermissionMode.DEFAULT);
+                    System.out.println("[权限模式已切换：" + mode + "（作用于当前会话）"
+                            + (mode.equals("explore")
+                                    ? "——query_ticket/list_my_tickets 等只读工具照常（readOnly 自动放行），"
+                                      + "draft_ticket/update_ticket_status 等写操作将被引擎拒绝]"
+                                    : "]"));
                     continue;
                 }
                 if (input.equals("/sessions")) {
@@ -278,11 +306,12 @@ public class Main {
     private static void printHelp() {
         System.out.println("""
                 /reset             重置当前用户的会话（清空上下文）
-                /user <name>       切换对话用户（各用户记忆独立）
+                /user <name>       切换会话身份（身份决定工单数据与工具权限；管理员：it-admin）
                 /sessions          列出当前用户的历史会话
                 /resume <n>        恢复第 n 个历史会话（或直接粘贴完整会话 ID）
                 /kb                查看知识库统计（/kb reload 重新导入）
                 /mode graph|react  编排模式：graph=图编排（默认）/ react=自由对话
+                /perm default|explore  权限模式：default=默认 / explore=只读（写操作被官方引擎拒绝）
                 /quit              退出""");
     }
 

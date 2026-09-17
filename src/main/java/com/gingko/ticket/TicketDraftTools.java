@@ -1,5 +1,6 @@
 package com.gingko.ticket;
 
+import io.agentscope.core.agent.RuntimeContext;
 import io.agentscope.core.tool.Tool;
 import io.agentscope.core.tool.ToolParam;
 
@@ -15,15 +16,16 @@ import io.agentscope.core.tool.ToolParam;
  *   <li>草稿写入共享 {@link TicketDraftBox}：确认门读的就是模型展示给员工的那份草稿，
  *       「看到的」与「落库的」是同一份数据（E05 语义保持）。</li>
  * </ul>
+ *
+ * <p>M7（E07）：草稿归属从构造时固定用户改为 {@link RuntimeContext} 方法注入
+ * ——草稿箱按当次会话身份分桶，多用户同 agent 实例下草稿互不可见。
  */
 public class TicketDraftTools {
 
     private final TicketDraftBox draftBox;
-    private final String currentUser;
 
-    public TicketDraftTools(TicketDraftBox draftBox, String currentUser) {
+    public TicketDraftTools(TicketDraftBox draftBox) {
         this.draftBox = draftBox;
-        this.currentUser = currentUser;
     }
 
     @Tool(name = "draft_ticket",
@@ -39,7 +41,8 @@ public class TicketDraftTools {
             @ToolParam(name = "summary", description = "问题摘要：现象、影响、员工诉求") String summary,
             @ToolParam(name = "contextSummary",
                     description = "对话上下文摘要：本次对话已排查的步骤与结论，供 IT 工程师接单参考；"
-                            + "排查类对话转建单时必填，无排查过程传空字符串") String contextSummary) {
+                            + "排查类对话转建单时必填，无排查过程传空字符串") String contextSummary,
+            RuntimeContext ctx) {
         if (title == null || title.isBlank()) {
             return "[草稿生成失败] 工单标题不能为空——请先向员工了解问题或诉求，再生成草稿";
         }
@@ -53,7 +56,7 @@ public class TicketDraftTools {
                 title.trim(),
                 orEmpty(summary),
                 orEmpty(contextSummary));
-        draftBox.put(currentUser, draft);
+        draftBox.put(ctx.getUserId(), draft);
         return "工单草稿已生成（未落库，等待员工确认）：\n\n" + draft.renderCard();
     }
 

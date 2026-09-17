@@ -1,5 +1,6 @@
 package com.gingko.ticket;
 
+import io.agentscope.core.agent.RuntimeContext;
 import io.agentscope.core.tool.Tool;
 import io.agentscope.core.tool.ToolParam;
 
@@ -23,24 +24,25 @@ import io.agentscope.core.tool.ToolParam;
  * <p>E06 变更：草稿箱外提为共享 {@link TicketDraftBox}（本类注入使用，行为不变）；
  * 图模式装配改用 {@link TicketDraftTools}（只有 draft_ticket，create/cancel 不注册——
  * 落库权收归图的 confirm 节点）。本类保留给自由模式（M5 验收回归）。
+ *
+ * <p>M7（E07）：当前用户从构造时固定字符串改为 {@link RuntimeContext} 方法注入，
+ * 草稿箱按当次会话身份分桶（与图模式同口径）。
  */
 public class TicketCreationTools {
 
     private final TicketStore store;
-    private final String currentUser;
 
     /** 草稿箱：reporter → 待确认草稿（E06 外提为共享组件，与图 confirm 节点同源）。 */
     private final TicketDraftBox draftBox;
 
-    public TicketCreationTools(TicketStore store, String currentUser) {
-        this(store, new TicketDraftBox(), currentUser);
+    public TicketCreationTools(TicketStore store) {
+        this(store, new TicketDraftBox());
     }
 
     /** 注入共享草稿箱的构造（草稿状态跨组件可见）。 */
-    public TicketCreationTools(TicketStore store, TicketDraftBox draftBox, String currentUser) {
+    public TicketCreationTools(TicketStore store, TicketDraftBox draftBox) {
         this.store = store;
         this.draftBox = draftBox;
-        this.currentUser = currentUser;
     }
 
     @Tool(name = "draft_ticket",
@@ -56,7 +58,8 @@ public class TicketCreationTools {
             @ToolParam(name = "summary", description = "问题摘要：现象、影响、员工诉求") String summary,
             @ToolParam(name = "contextSummary",
                     description = "对话上下文摘要：本次对话已排查的步骤与结论，供 IT 工程师接单参考；"
-                            + "排查类对话转建单时必填，无排查过程传空字符串") String contextSummary) {
+                            + "排查类对话转建单时必填，无排查过程传空字符串") String contextSummary,
+            RuntimeContext ctx) {
         if (title == null || title.isBlank()) {
             return "[草稿生成失败] 工单标题不能为空——请先向员工了解问题或诉求，再生成草稿";
         }
@@ -70,7 +73,7 @@ public class TicketCreationTools {
                 title.trim(),
                 orEmpty(summary),
                 orEmpty(contextSummary));
-        draftBox.put(currentUser, draft);
+        draftBox.put(ctx.getUserId(), draft);
         return "草稿已生成（未落库，等待员工确认）：\n\n" + draft.renderCard();
     }
 
@@ -79,13 +82,14 @@ public class TicketCreationTools {
                     + "仅在员工明确确认草稿内容（如回复“确认”“没问题”）后才调用；"
                     + "员工要求跳过确认直接建单时，仍必须先展示草稿卡等确认",
             concurrencySafe = false)
-    public String createTicket() {
-        TicketDraft draft = draftBox.get(currentUser).orElse(null);
+    public String createTicket(RuntimeContext ctx) {
+        String userId = ctx.getUserId();
+        TicketDraft draft = draftBox.get(userId).orElse(null);
         if (draft == null) {
             return "[建单失败] 当前没有待确认的工单草稿——请先用 draft_ticket 生成草稿卡并展示给员工确认";
         }
-        Ticket created = store.create(draft, currentUser);
-        draftBox.remove(currentUser);
+        Ticket created = store.create(draft, userId);
+        draftBox.remove(userId);
         return "工单已创建：[" + created.id() + "] " + created.title()
                 + "（分类：" + created.category() + "，优先级：" + created.priority()
                 + "，状态：" + created.status() + "）\n"
@@ -95,8 +99,8 @@ public class TicketCreationTools {
     @Tool(name = "cancel_ticket_draft",
             description = "取消建单：丢弃当前待确认的工单草稿（员工放弃建单或改变主意时调用）",
             concurrencySafe = false)
-    public String cancelTicketDraft() {
-        return draftBox.remove(currentUser).isPresent()
+    public String cancelTicketDraft(RuntimeContext ctx) {
+        return draftBox.remove(ctx.getUserId()).isPresent()
                 ? "工单草稿已取消（未落库）。"
                 : "当前没有待取消的工单草稿。";
     }

@@ -41,6 +41,11 @@ public class MockTicketStore implements TicketStore {
     }
 
     @Override
+    public List<Ticket> findAll() {
+        return List.copyOf(tickets);
+    }
+
+    @Override
     public Ticket create(TicketDraft draft, String reporter) {
         String id = String.valueOf(nextId.getAndIncrement());
         Ticket ticket = new Ticket(
@@ -61,5 +66,19 @@ public class MockTicketStore implements TicketStore {
     /** 当前工单总数（验收断言用：建单前后对比）。 */
     public int size() {
         return tickets.size();
+    }
+
+    @Override
+    public Optional<Ticket> updateStatus(String id, String status) {
+        for (int i = 0; i < tickets.size(); i++) {
+            Ticket t = tickets.get(i);
+            if (t.id().equals(id)) {
+                Ticket updated = new Ticket(t.id(), t.title(), status, t.assignee(), t.createdAt(),
+                        t.reporter(), t.category(), t.priority(), t.summary(), t.contextSummary());
+                tickets.set(i, updated);
+                return Optional.of(updated);
+            }
+        }
+        return Optional.empty();
     }
 }

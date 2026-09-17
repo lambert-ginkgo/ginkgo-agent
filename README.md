@@ -9,7 +9,7 @@
 | 项 | 要求 |
 | --- | --- |
 | JDK | 21（本仓库编译目标，以 pom.xml 为基准，低于 21 编译报"无效的目标发行版"；AgentScope Java 框架自身基线为 17+） |
-| 构建 | Maven 3.6+ |
+| 构建 | Maven 4.0（E07 起以 4.0.0-rc-6 验证：`clean compile` / `dependency:build-classpath` / 验收运行全通过；传统 POM 无需改动即可在 Maven 4 下构建，3.8+ 亦可） |
 | 框架 | AgentScope Java 2.0.3（E04 起从 2.0.1 升级：状态乐观并发、FinalAnswerFilterMiddleware、推理循环可靠性修复等；升级点详见系列 E04 文章） |
 | 模型 | DeepSeek（OpenAI 兼容端点，默认 `deepseek-chat`） |
 | 向量模型（E04 起，可选） | OpenAI 兼容 embedding 服务（默认阿里云百炼 `qwen3.7-text-embedding-flash`，可换硅基流动等；DeepSeek 官方 API 无 embeddings 端点。注意用通用端点 `dashscope.aliyuncs.com/compatible-mode/v1`，别用控制台显示的专属端点——会 404） |
@@ -46,10 +46,12 @@ mvn compile exec:java
 | --- | --- |
 | 任意文本 | 与 Agent 对话（流式输出，多轮上下文自动保持） |
 | `/reset` | 重置会话，清空上下文重新开始 |
-| `/user <name>` | 切换对话用户（E03 起：各用户会话状态与记忆相互隔离） |
+| `/user <name>` | 切换会话身份（E03 起会话记忆隔离；**E07 起工单数据与工具权限按身份判定**——员工仅本人工单，管理员 `it-admin` 可看全部并处理工单） |
 | `/sessions` | 列出当前用户的历史会话（状态落盘于 `~/.agentscope/state/`） |
 | `/resume <序号或会话ID>` | 恢复指定历史会话，重启后也能接上上次进度 |
 | `/kb` / `/kb reload` | 查看知识库统计 / 重新扫描导入 `knowledge/` 目录下的文档（E04 起） |
+| `/mode graph\|react` | 编排模式（E06 起）：graph=图编排（默认，意图路由/知识预检索/建单确认门由代码固化）/ react=自由对话 |
+| `/perm default\|explore` | 权限模式（E07 起）：explore=只读模式——`readOnly=true` 的工具自动放行、写操作被框架权限引擎拒绝 |
 | `/help` | 命令帮助 |
 | `/quit` | 退出 |
 
@@ -69,8 +71,10 @@ mvn compile exec:java
 | E02 | M2 工单查询工具：@Tool 注解 + Toolkit 注册 + mock 数据源（TicketStore 接口抽象） | ✅ |
 | E03 | M3 会话记忆：指代消解 + 多用户会话隔离 + 会话恢复（/sessions /resume）+ 长对话压缩（CompactionConfig） | ✅ |
 | E04 | M4 知识库问答：文档切分与向量化（rag-simple 扩展）+ 检索工具（带出处/相似度/未命中话术）+ /kb 管理 | ✅ |
-| E05 | M5 智能建单：意图路由（查询/直答/排查/建单）+ 两阶段建单（草稿卡确认后落库）+ 结构化输出意图分类器 | 🔨 开发中 |
-| E06-E11 | 见 [docs/PRD.md](docs/PRD.md) 里程碑表 | ⬜ |
+| E05 | M5 智能建单：意图路由（查询/直答/排查/建单）+ 两阶段建单（草稿卡确认后落库）+ 结构化输出意图分类器 | ✅ |
+| E06 | M6 流程编排：手搓轻量 Graph 引擎（无原生 Graph 可用）+ 服务台工作流固化（意图条件边/知识预检索/确认门节点化） | ✅ |
+| E07 | M7 权限控制：会话身份贯通（RuntimeContext 注入工具）+ 数据行级权限 + IT 管理员工具 + 提示注入防护 + 官方 EXPLORE 只读模式 | 🔨 开发中 |
+| E08-E11 | 见 [docs/PRD.md](docs/PRD.md) 里程碑表 | ⬜ |
 
 ## 目录结构
 
@@ -80,11 +84,17 @@ mvn compile exec:java
 ├── knowledge/                             # M4 知识库文档目录（E04，往里放 .md 即导入）
 └── src/main/java/com/gingko/
     ├── Main.java                          # CLI 入口：对话循环 + 流式渲染 + 工具调用事件打印
-    ├── agent/AgentFactory.java            # Agent 装配工厂（sysPrompt 意图路由与建单纪律 + 工具箱 + 压缩策略）
+    ├── agent/AgentFactory.java            # Agent 装配工厂（sysPrompt 任务纪律 + 工具箱 + 压缩策略；E06 起图/自由双模式装配）
+    ├── auth/                              # M7 身份与权限域（E07）
+    │   ├── User.java                      # 会话身份（userId + 角色：员工 / IT 管理员）
+    │   ├── UserDirectory.java             # mock 身份源（未注册身份 fail-safe 给最低权限）
+    │   └── TicketPermission.java          # 数据行级 + 工具级权限判定与拦截话术
     ├── config/AgentConfig.java            # 配置集中加载与启动校验
-    ├── dev/LongConversationRun.java       # M3 自动化验收：会话隔离 + 50 轮长对话
-    ├── dev/KnowledgeAcceptanceRun.java    # M4 自动化验收：检索层五节（导入/命中/未命中/增量/输出契约）
-    ├── dev/M5AcceptanceRun.java           # M5 自动化验收：意图分类 16 条测试集 + 建单六节
+    ├── flow/ServiceDeskFlow.java          # M6 服务台工作流（图编排：意图路由/预检索/确认门 + E07 身份贯通）
+    ├── workflow/                          # M6 手搓轻量 Graph 引擎（E06）
+    │   ├── WorkflowGraph.java             # Builder 固定边/条件边 + compile 校验 + MAX_STEPS 防死循环
+    │   ├── WorkflowState.java / NodeTrace.java / NodeAction.java / GraphExecutionException.java
+    ├── dev/                               # 各集自动化验收（M3/M4/M5/M6/M7）
     ├── session/SessionHistory.java        # 历史会话扫描（/sessions /resume 支撑）
     ├── intent/                            # M5 意图域（E05）
     │   ├── TicketIntent.java              # 结构化输出目标类型（record + enum）
@@ -92,13 +102,16 @@ mvn compile exec:java
     ├── knowledge/                         # M4 知识库域（E04）
     │   ├── KnowledgeService.java          # 导入/重载/检索装配（SimpleKnowledge + InMemoryStore）
     │   └── KnowledgeTools.java            # @Tool 工具：search_knowledge（带出处）
-    └── ticket/                            # M2/M5 工单域（E02 查询，E05 建单）
+    └── ticket/                            # M2/M5/M6/M7 工单域（E02 查询，E05 建单，E06 草稿箱，E07 权限）
         ├── Ticket.java                    # 工单记录（M5 扩展分类/优先级/摘要/上下文）
-        ├── TicketStore.java               # 数据源接口（mock/真实存储可替换）
+        ├── TicketStore.java               # 数据源接口（mock/真实存储可替换；M7 增 updateStatus/findAll）
         ├── MockTicketStore.java           # mock 数据源（测试数据 + 自增工单号）
         ├── TicketDraft.java               # 建单草稿（确认前的字段集合 + 草稿卡渲染）
-        ├── TicketTools.java               # @Tool 工具：query_ticket / list_my_tickets
-        └── TicketCreationTools.java       # @Tool 工具：draft_ticket / create_ticket / cancel_ticket_draft
+        ├── TicketDraftBox.java            # 共享草稿箱（reporter → 草稿；M6 外提、M7 按会话身份分桶）
+        ├── TicketTools.java               # @Tool 工具：query_ticket / list_my_tickets（M7 身份注入 + 数据过滤）
+        ├── TicketDraftTools.java          # @Tool 工具：draft_ticket（图模式，M6 起）
+        ├── TicketCreationTools.java       # @Tool 工具：draft/create/cancel（自由模式，M5）
+        └── AdminTicketTools.java          # @Tool 工具：list_all_tickets / update_ticket_status（M7 管理员专属）
 ```
 
 ## License
